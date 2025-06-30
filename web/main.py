@@ -13,23 +13,21 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 import logging
 import asyncio
+import urllib.parse
 
-# Настройка логирования
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
 templates = Jinja2Templates(directory="web/templates")
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 SECRET_KEY = "super-secret-key"
 ALGORITHM = "HS256"
 
-# Создание движка и пула сессий
 engine = create_async_engine(Config.DATABASE_URL, echo=False)
 async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
-# Создание таблиц при запуске
 @app.on_event("startup")
 async def startup_event():
     async with engine.begin() as conn:
@@ -49,15 +47,26 @@ def create_access_token(data: dict):
     return encoded_jwt
 
 
-async def get_current_user(token: str = Depends(oauth2_scheme)):
-    logger.info(f"Received token: {token}")
+async def get_current_user(request: Request, token: str = Depends(oauth2_scheme)):
+    if not token:
+        raw_token = request.cookies.get("access_token")
+        logger.info(f"Raw cookie value: {raw_token}")
+        if raw_token:
+            # Декодируем URL-кодированные символы, такие как %20
+            raw_token = urllib.parse.unquote(raw_token)
+            if raw_token.startswith("Bearer "):
+                token = raw_token[len("Bearer ") :]
+            else:
+                token = raw_token
+        logger.info(f"Extracted token from cookie: {token}")
+
     if not token:
         logger.warning("No token provided")
         return None
+
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
-        logger.info(f"Decoded JWT payload: {payload}")
         if username is None:
             logger.warning("No username in token payload")
             return None
@@ -69,14 +78,16 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
+    logger.info("Rendering login page")
     return templates.TemplateResponse("login.html", {"request": request})
 
 
 @app.post("/login", response_class=RedirectResponse)
-async def login(form_data: OAuth2PasswordRequestForm = Depends()):
+async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends()):
     logger.info(f"Login attempt with username: {form_data.username}")
+    hashed_password = pwd_context.hash(Config.ADMIN_PASSWORD)
     if form_data.username == Config.ADMIN_USERNAME and pwd_context.verify(
-        form_data.password, pwd_context.hash(Config.ADMIN_PASSWORD)
+        form_data.password, hashed_password
     ):
         access_token = create_access_token(data={"sub": form_data.username})
         response = RedirectResponse(url="/", status_code=303)
@@ -84,10 +95,12 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
             key="access_token",
             value=f"Bearer {access_token}",
             httponly=True,
-            secure=False,  # Для localhost используем False, для продакшена включите True
+            secure=False,  # Для localhost
             samesite="lax",
+            path="/",
+            max_age=24 * 3600,
         )
-        logger.info("Login successful, redirecting to /")
+        logger.info(f"Login successful, set cookie with token: Bearer {access_token}")
         return response
     logger.error("Invalid credentials")
     raise HTTPException(status_code=401, detail="Неверные учетные данные")
@@ -96,7 +109,7 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
 @app.get("/logout", response_class=RedirectResponse)
 async def logout():
     response = RedirectResponse(url="/login", status_code=303)
-    response.delete_cookie("access_token")
+    response.delete_cookie("access_token", path="/")
     logger.info("User logged out")
     return response
 
@@ -107,6 +120,17 @@ async def dashboard(request: Request, current_user: str = Depends(get_current_us
         logger.warning("Unauthorized access to /, redirecting to /login")
         return RedirectResponse(url="/login", status_code=303)
     logger.info(f"Dashboard accessed by user: {current_user}")
+    return templates.TemplateResponse("dashboard.html", {"request": request})
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard_alias(
+    request: Request, current_user: str = Depends(get_current_user)
+):
+    if not current_user:
+        logger.warning("Unauthorized access to /dashboard, redirecting to /login")
+        return RedirectResponse(url="/login", status_code=303)
+    logger.info(f"Dashboard accessed by user via /dashboard: {current_user}")
     return templates.TemplateResponse("dashboard.html", {"request": request})
 
 
@@ -230,8 +254,8 @@ async def send_broadcast(
     return RedirectResponse(url="/broadcast", status_code=303)
 
 
-# Обработка запросов к apple-touch-icon
 @app.get("/apple-touch-icon-precomposed.png")
 @app.get("/apple-touch-icon.png")
+@app.get("/favicon.ico")
 async def apple_touch_icon():
     return Response(status_code=204)
