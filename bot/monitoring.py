@@ -5,13 +5,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from models.models import Site, SystemSettings
 from config import Config
+import httpx
 
 
 async def check_website(url: str) -> bool:
     try:
-        response = requests.get(url, timeout=5)
+        async with httpx.AsyncClient(timeout=5) as client:
+            response = await client.get(url)
         return response.status_code == 200
-    except requests.RequestException:
+    except Exception:
         return False
 
 

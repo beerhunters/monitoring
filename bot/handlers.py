@@ -1,3 +1,5 @@
+from sqlite3 import IntegrityError
+
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import CommandStart
@@ -27,8 +29,13 @@ async def start_command(message: Message, state: FSMContext, session: AsyncSessi
 
         if not user:
             user = User(telegram_id=telegram_id, username=username)
-            db.add(user)
-            await db.commit()
+            # db.add(user)
+            # await db.commit()
+            try:
+                db.add(user)
+                await db.commit()
+            except IntegrityError:
+                await db.rollback()
 
         await message.answer(
             "Добро пожаловать в бот мониторинга сайтов!",

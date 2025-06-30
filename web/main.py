@@ -42,8 +42,11 @@ def create_access_token(data: dict):
     to_encode = data.copy()
     expire = datetime.utcnow() + timedelta(hours=24)
     to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    logger.info(f"Created JWT token: {encoded_jwt}")
+    try:
+        encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+        logger.info(f"Created JWT token: {encoded_jwt}")
+    except Exception as e:
+        logger.error(e)
     return encoded_jwt
 
 
