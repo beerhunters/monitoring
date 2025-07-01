@@ -9,4 +9,4 @@ class Config:
     DATABASE_URL = os.getenv("DATABASE_URL")
     ADMIN_USERNAME = os.getenv("ADMIN_USERNAME")
     ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
-    CHECK_INTERVAL = 3600
+    CHECK_INTERVAL = 60
