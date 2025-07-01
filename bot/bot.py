@@ -1,19 +1,17 @@
-import asyncio
 import logging
+import asyncio
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
+from bot.handlers import router
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from config import Config
-from bot.handlers import router
 from bot.monitoring import start_monitoring
-from models.models import Base
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
 
-# Middleware для внедрения сессии
 class DbSessionMiddleware:
     def __init__(self, session_pool):
         self.session_pool = session_pool
@@ -25,30 +23,22 @@ class DbSessionMiddleware:
 
 
 async def main():
-    # Создание движка и пула сессий
     engine = create_async_engine(Config.DATABASE_URL, echo=False)
     async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
-    # Создание таблиц при запуске
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-    # Инициализация бота и диспетчера
     bot = Bot(token=Config.TELEGRAM_TOKEN)
     dp = Dispatcher(storage=MemoryStorage())
-
-    # Добавление middleware
-    dp.update.middleware(DbSessionMiddleware(async_session))
     dp.include_router(router)
+    dp.message.middleware(DbSessionMiddleware(async_session))
 
-    # Запуск задачи мониторинга
+    # Start monitoring as a background task
+    logger.info("Starting website monitoring task")
     asyncio.create_task(start_monitoring(bot, async_session))
 
-    try:
-        await dp.start_polling(bot)
-    finally:
-        await engine.dispose()
+    logger.info("Starting bot polling")
+    await dp.start_polling(bot)
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     asyncio.run(main())

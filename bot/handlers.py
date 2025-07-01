@@ -10,6 +10,11 @@ from sqlalchemy.future import select
 from models.models import User, Site, SystemSettings
 from bot.keyboard import get_main_keyboard
 import validators
+import logging
+
+
+logging.basicConfig(level=logging.ERROR)
+logger = logging.getLogger(__name__)
 
 router = Router()
 
