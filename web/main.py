@@ -16,8 +16,27 @@ import urllib.parse
 from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest
 from zoneinfo import ZoneInfo
+from logging import Formatter
+
+
+class MSKFormatter(Formatter):
+    def converter(self, timestamp):
+        return timestamp.astimezone(ZoneInfo("Europe/Moscow"))
+
+    def formatTime(self, record, datefmt=None):
+        dt = self.converter(datetime.fromtimestamp(record.created))
+        if datefmt:
+            return dt.strftime(datefmt)
+        return dt.strftime("%Y-%m-%d %H:%M:%S %Z")
+
 
 logger = logging.getLogger(__name__)
+handler = logging.StreamHandler()
+handler.setFormatter(
+    MSKFormatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+)
+logger.addHandler(handler)
+logger.setLevel(logging.INFO)
 
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="web/static"), name="static")
@@ -37,12 +56,6 @@ async def startup_event():
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login", auto_error=False)
 
 
-# def create_access_token(data: dict):
-#     to_encode = data.copy()
-#     expire = datetime.utcnow() + timedelta(hours=24)
-#     to_encode.update({"exp": expire})
-#     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-#     return encoded_jwt
 def create_access_token(data: dict):
     to_encode = data.copy()
     msk_tz = ZoneInfo("Europe/Moscow")
@@ -124,6 +137,31 @@ async def dashboard(request: Request, current_user: str = Depends(get_current_us
                 "check_interval": interval,
             },
         )
+
+
+@app.get("/sites", response_class=HTMLResponse)
+async def sites(request: Request, current_user: str = Depends(get_current_user)):
+    if not current_user:
+        return RedirectResponse(url="/login", status_code=303)
+    async with async_session() as session:
+        result = await session.execute(select(Site).join(User))
+        sites = result.scalars().all()
+        return templates.TemplateResponse(
+            "sites.html", {"request": request, "sites": sites}
+        )
+
+
+@app.post("/sites/{site_id}/delete", response_class=RedirectResponse)
+async def delete_site(site_id: int, current_user: str = Depends(get_current_user)):
+    if not current_user:
+        return RedirectResponse(url="/login", status_code=303)
+    async with async_session() as session:
+        result = await session.execute(select(Site).filter_by(id=site_id))
+        site = result.scalar_one_or_none()
+        if site:
+            await session.delete(site)
+            await session.commit()
+        return RedirectResponse(url="/sites", status_code=303)
 
 
 @app.get("/users", response_class=HTMLResponse)

@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Сайты</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    <link href="/static/styles.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg fixed-top">
+        <div class="container">
+            <a class="navbar-brand" href="/">Мониторинг сайтов</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item"><a class="nav-link" href="/users"><i class="fas fa-users me-2"></i>Пользователи</a></li>
+                    <li class="nav-item"><a class="nav-link" href="/settings"><i class="fas fa-cog me-2"></i>Настройки</a></li>
+                    <li class="nav-item"><a class="nav-link" href="/broadcast"><i class="fas fa-bullhorn me-2"></i>Рассылка</a></li>
+                    <li class="nav-item"><a class="nav-link text-danger" href="/logout"><i class="fas fa-sign-out-alt me-2"></i>Выход</a></li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+    <div class="container">
+        <h1 class="mb-4"><i class="fas fa-globe me-2"></i>Сайты</h1>
+        {% if sites %}
+            <div class="card">
+                <div class="card-header">
+                    <h5>Список сайтов</h5>
+                </div>
+                <div class="card-body">
+                    <table class="table table-bordered">
+                        <thead>
+                            <tr>
+                                <th>URL</th>
+                                <th>Статус</th>
+                                <th>Последняя проверка</th>
+                                <th>Пользователь</th>
+                                <th>Действия</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for site in sites %}
+                                <tr>
+                                    <td>{{ site.url }}</td>
+                                    <td>
+                                        <span class="badge {{ 'bg-success' if site.is_available else 'bg-danger' }}">
+                                            {{ 'Доступен' if site.is_available else 'Недоступен' }}
+                                        </span>
+                                    </td>
+                                    <td>{{ site.last_checked.strftime('%Y-%m-%d %H:%M:%S MSK') if site.last_checked else 'Никогда' }}</td>
+                                    <td>{{ site.user.username or site.user.telegram_id }}</td>
+                                    <td>
+                                        <form method="POST" action="/sites/{{ site.id }}/delete">
+                                            <button type="submit" class="btn btn-sm btn-danger"><i class="fas fa-trash me-2"></i>Удалить</button>
+                                        </form>
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        {% else %}
+            <div class="card">
+                <div class="card-body">
+                    <p><i class="fas fa-exclamation-circle me-2"></i>Сайты не найдены.</p>
+                </div>
+            </div>
+        {% endif %}
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

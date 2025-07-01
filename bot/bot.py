@@ -1,19 +1,36 @@
 import logging
 import asyncio
+from datetime import datetime
+
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 from bot.handlers import router
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
+from logging import Formatter
+from zoneinfo import ZoneInfo
 from config import Config
 from bot.monitoring import start_monitoring
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
+
+class MSKFormatter(Formatter):
+    def converter(self, timestamp):
+        return timestamp.astimezone(ZoneInfo("Europe/Moscow"))
+
+    def formatTime(self, record, datefmt=None):
+        dt = self.converter(datetime.fromtimestamp(record.created))
+        if datefmt:
+            return dt.strftime(datefmt)
+        return dt.strftime("%Y-%m-%d %H:%M:%S %Z")
+
+
 logger = logging.getLogger(__name__)
+handler = logging.StreamHandler()
+handler.setFormatter(
+    MSKFormatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+)
+logger.addHandler(handler)
+logger.setLevel(logging.INFO)
 
 
 class DbSessionMiddleware:
@@ -40,20 +57,17 @@ async def main():
         engine = create_async_engine(Config.DATABASE_URL, echo=False)
         logger.info("Database engine created successfully")
 
-        logger.debug("Creating sessionmaker for AsyncSession")
         async_session = sessionmaker(
             engine, class_=AsyncSession, expire_on_commit=False
         )
-        logger.debug("Sessionmaker created")
 
         logger.info("Initializing Telegram bot")
         bot = Bot(token=Config.TELEGRAM_TOKEN)
         dp = Dispatcher(storage=MemoryStorage())
         logger.info("Bot and Dispatcher initialized")
 
-        logger.debug("Including router in Dispatcher")
         dp.include_router(router)
-        logger.debug("Registering DbSessionMiddleware")
+
         dp.message.middleware(DbSessionMiddleware(async_session))
 
         logger.info("Starting website monitoring task")
