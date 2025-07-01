@@ -7,6 +7,12 @@ import logging
 from logging import Formatter
 from zoneinfo import ZoneInfo
 from datetime import datetime
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 
 class MSKFormatter(Formatter):
@@ -32,9 +38,7 @@ logger.setLevel(logging.INFO)
 async def init_db():
     await asyncio.sleep(5)
     logger.info("Initializing database")
-    engine = create_async_engine(
-        "postgresql+psycopg://user:password@db:5432/monitor", echo=False
-    )
+    engine = create_async_engine(DATABASE_URL, echo=False)
     async with engine.begin() as conn:
         logger.info("Creating tables")
         await conn.run_sync(Base.metadata.create_all)
