@@ -13,6 +13,16 @@
             <a class="nav-link" href="/settings">Настройки</a>
             <a class="nav-link text-danger" href="/logout">Выход</a>
         </nav>
+        {% if broadcast_completed %}
+            <div class="alert alert-success" role="alert">
+                Рассылка завершена: успешно отправлено {{ successful_count }} сообщений.
+            </div>
+            {% if failed_count %}
+                <div class="alert alert-warning" role="alert">
+                    Не удалось отправить {{ failed_count }} сообщений.
+                </div>
+            {% endif %}
+        {% endif %}
         <form method="POST" action="/broadcast">
             <div class="mb-3">
                 <label for="message" class="form-label">Сообщение</label>

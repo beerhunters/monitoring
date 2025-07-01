@@ -8,37 +8,69 @@ from sqlalchemy.orm import sessionmaker
 from config import Config
 from bot.monitoring import start_monitoring
 
-logging.basicConfig(level=logging.ERROR)
+logging.basicConfig(
+    level=logging.ERROR,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
 logger = logging.getLogger(__name__)
 
 
 class DbSessionMiddleware:
     def __init__(self, session_pool):
+        logger.debug("Initializing DbSessionMiddleware with session pool")
         self.session_pool = session_pool
 
     async def __call__(self, handler, event, data):
+        logger.debug(f"Processing event {event} with DbSessionMiddleware")
         async with self.session_pool() as session:
             data["session"] = session
-            return await handler(event, data)
+            try:
+                return await handler(event, data)
+            except Exception as e:
+                logger.error(
+                    f"Error in DbSessionMiddleware for event {event}: {str(e)}"
+                )
+                raise
 
 
 async def main():
-    engine = create_async_engine(Config.DATABASE_URL, echo=False)
-    async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    try:
+        logger.info("Creating async database engine")
+        engine = create_async_engine(Config.DATABASE_URL, echo=False)
+        logger.info("Database engine created successfully")
 
-    bot = Bot(token=Config.TELEGRAM_TOKEN)
-    dp = Dispatcher(storage=MemoryStorage())
-    dp.include_router(router)
-    dp.message.middleware(DbSessionMiddleware(async_session))
+        logger.debug("Creating sessionmaker for AsyncSession")
+        async_session = sessionmaker(
+            engine, class_=AsyncSession, expire_on_commit=False
+        )
+        logger.debug("Sessionmaker created")
 
-    # Start monitoring as a background task
-    logger.info("Starting website monitoring task")
-    asyncio.create_task(start_monitoring(bot, async_session))
+        logger.info("Initializing Telegram bot")
+        bot = Bot(token=Config.TELEGRAM_TOKEN)
+        dp = Dispatcher(storage=MemoryStorage())
+        logger.info("Bot and Dispatcher initialized")
 
-    logger.info("Starting bot polling")
-    await dp.start_polling(bot)
+        logger.debug("Including router in Dispatcher")
+        dp.include_router(router)
+        logger.debug("Registering DbSessionMiddleware")
+        dp.message.middleware(DbSessionMiddleware(async_session))
+
+        logger.info("Starting website monitoring task")
+        asyncio.create_task(start_monitoring(bot, async_session))
+
+        logger.info("Starting bot polling")
+        await dp.start_polling(bot)
+    except Exception as e:
+        logger.error(f"Error in main: {str(e)}")
+        raise
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    asyncio.run(main())
+    logger.info("Starting application")
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("Application stopped by user")
+    except Exception as e:
+        logger.error(f"Application failed to start: {str(e)}")

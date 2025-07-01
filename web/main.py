@@ -14,8 +14,9 @@ from passlib.context import CryptContext
 import logging
 import asyncio
 import urllib.parse
+from aiogram.exceptions import TelegramBadRequest
+from aiohttp import ClientSession
 
-logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
@@ -189,7 +190,6 @@ async def delete_site(site_id: int, current_user: str = Depends(get_current_user
 @app.get("/settings", response_class=HTMLResponse)
 async def settings(request: Request, current_user: str = Depends(get_current_user)):
     if not current_user:
-        logger.warning("Unauthorized access to /settings, redirecting to /login")
         return RedirectResponse(url="/login", status_code=303)
     async with async_session() as session:
         result = await session.execute(
@@ -197,17 +197,18 @@ async def settings(request: Request, current_user: str = Depends(get_current_use
         )
         settings = result.scalar_one_or_none()
         interval = settings.value if settings else Config.CHECK_INTERVAL
-    return templates.TemplateResponse(
-        "settings.html", {"request": request, "check_interval": interval}
-    )
+        return templates.TemplateResponse(
+            "settings.html", {"request": request, "check_interval": interval}
+        )
 
 
-@app.post("/settings", response_class=RedirectResponse)
+@app.post("/settings", response_class=HTMLResponse)
 async def update_settings(
-    check_interval: int = Form(...), current_user: str = Depends(get_current_user)
+    request: Request,
+    check_interval: int = Form(...),
+    current_user: str = Depends(get_current_user),
 ):
     if not current_user:
-        logger.warning("Unauthorized access to /settings POST, redirecting to /login")
         return RedirectResponse(url="/login", status_code=303)
     async with async_session() as session:
         result = await session.execute(
@@ -220,41 +221,68 @@ async def update_settings(
             settings = SystemSettings(key="check_interval", value=str(check_interval))
             session.add(settings)
         await session.commit()
-        logger.info(
-            f"Settings updated by user: {current_user}, check_interval: {check_interval}"
+        return templates.TemplateResponse(
+            "settings.html",
+            {
+                "request": request,
+                "check_interval": check_interval,
+                "success_message": f"Интервал проверки успешно сохранён - {check_interval} секунд(а)",
+            },
         )
-    return RedirectResponse(url="/settings", status_code=303)
 
 
 @app.get("/broadcast", response_class=HTMLResponse)
 async def broadcast(request: Request, current_user: str = Depends(get_current_user)):
     if not current_user:
-        logger.warning("Unauthorized access to /broadcast, redirecting to /login")
         return RedirectResponse(url="/login", status_code=303)
     return templates.TemplateResponse("broadcast.html", {"request": request})
 
 
-@app.post("/broadcast", response_class=RedirectResponse)
+@app.post("/broadcast", response_class=HTMLResponse)
 async def send_broadcast(
-    message: str = Form(...), current_user: str = Depends(get_current_user)
+    request: Request,
+    message: str = Form(...),
+    current_user: str = Depends(get_current_user),
 ):
     if not current_user:
-        logger.warning("Unauthorized access to /broadcast POST, redirecting to /login")
         return RedirectResponse(url="/login", status_code=303)
     async with async_session() as session:
         result = await session.execute(select(User))
         users = result.scalars().all()
+        successful_count = 0
+        failed_count = 0
+        logger.info(f"Starting broadcast to {len(users)} users with message: {message}")
         bot = Bot(token=Config.TELEGRAM_TOKEN)
-        for user in users:
-            try:
-                await bot.send_message(user.telegram_id, message)
-            except Exception as e:
-                logger.error(
-                    f"Failed to send broadcast to user {user.telegram_id}: {str(e)}"
-                )
-        await bot.session.close()
-    logger.info(f"Broadcast sent by user: {current_user}")
-    return RedirectResponse(url="/broadcast", status_code=303)
+        try:
+            for user in users:
+                try:
+                    await bot.send_message(user.telegram_id, message)
+                    successful_count += 1
+                    logger.debug(f"Message sent to user {user.telegram_id}")
+                except TelegramBadRequest as e:
+                    failed_count += 1
+                    logger.error(
+                        f"Failed to send message to user {user.telegram_id}: {str(e)}"
+                    )
+                except Exception as e:
+                    failed_count += 1
+                    logger.error(
+                        f"Unexpected error sending message to user {user.telegram_id}: {str(e)}"
+                    )
+        finally:
+            await bot.session.close()
+        logger.info(
+            f"Broadcast completed: {successful_count} successful, {failed_count} failed"
+        )
+        return templates.TemplateResponse(
+            "broadcast.html",
+            {
+                "request": request,
+                "successful_count": successful_count,
+                "failed_count": failed_count,
+                "broadcast_completed": True,
+            },
+        )
 
 
 @app.get("/apple-touch-icon-precomposed.png")

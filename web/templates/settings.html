@@ -13,6 +13,11 @@
             <a class="nav-link" href="/broadcast">Рассылка</a>
             <a class="nav-link text-danger" href="/logout">Выход</a>
         </nav>
+        {% if success_message %}
+            <div class="alert alert-success" role="alert">
+                {{ success_message }}
+            </div>
+        {% endif %}
         <form method="POST" action="/settings">
             <div class="mb-3">
                 <label for="check_interval" class="form-label">Интервал проверки (секунды)</label>
