@@ -15,6 +15,7 @@ from passlib.context import CryptContext
 import urllib.parse
 from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 
@@ -36,9 +37,16 @@ async def startup_event():
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login", auto_error=False)
 
 
+# def create_access_token(data: dict):
+#     to_encode = data.copy()
+#     expire = datetime.utcnow() + timedelta(hours=24)
+#     to_encode.update({"exp": expire})
+#     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+#     return encoded_jwt
 def create_access_token(data: dict):
     to_encode = data.copy()
-    expire = datetime.utcnow() + timedelta(hours=24)
+    msk_tz = ZoneInfo("Europe/Moscow")
+    expire = datetime.now(msk_tz) + timedelta(hours=24)
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt

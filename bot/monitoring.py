@@ -5,26 +5,35 @@ from sqlalchemy.future import select
 from models.models import Site, SystemSettings, User
 from config import Config
 from datetime import datetime
+from datetime import datetime, timedelta
 import asyncio
 from aiogram.exceptions import TelegramBadRequest
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 
 
-async def check_website(url: str) -> bool:
-    logger.debug(f"Checking website: {url}")
-    async with httpx.AsyncClient() as client:
+async def check_website(url: str) -> tuple[bool, str]:
+    async with httpx.AsyncClient(follow_redirects=False) as client:
         try:
             response = await client.get(url, timeout=10)
-            response.raise_for_status()
-            logger.info(f"Website {url} is available")
-            return True
+            if 200 <= response.status_code < 300:
+                return True, "OK"
+            elif 300 <= response.status_code < 400:
+                redirect_location = response.headers.get("location", "unknown")
+                logger.error(
+                    f"Website {url} returned redirect {response.status_code} to {redirect_location}"
+                )
+                return False, f"Redirect {response.status_code} to {redirect_location}"
+            else:
+                logger.error(f"Website {url} returned status {response.status_code}")
+                return False, f"HTTP {response.status_code}"
         except httpx.HTTPError as e:
             logger.error(f"Website {url} is unavailable: {str(e)}")
-            return False
+            return False, str(e)
         except Exception as e:
-            logger.error(f"Unexpected error checking website {url}: {str(e)}")
-            return False
+            logger.error(f"Unexpected error checking {url}: {str(e)}")
+            return False, str(e)
 
 
 async def start_monitoring(bot, async_session):
@@ -45,6 +54,7 @@ async def start_monitoring(bot, async_session):
                 logger.debug("Fetching all sites from database")
                 result = await session.execute(select(Site))
                 sites = result.scalars().all()
+                msk_tz = ZoneInfo("Europe/Moscow")
                 logger.info(f"Found {len(sites)} sites to check")
 
                 for site in sites:
@@ -52,14 +62,15 @@ async def start_monitoring(bot, async_session):
                         f"Processing site ID {site.id}: {site.url} for user_id {site.user_id}"
                     )
                     try:
-                        is_available = await check_website(site.url)
-                        if is_available != site.is_available:
-                            logger.info(
-                                f"Site {site.url} status changed to {'available' if is_available else 'unavailable'}"
-                            )
+                        is_available, reason = await check_website(site.url)
+                        if site.is_available != is_available:
                             site.is_available = is_available
-                            site.last_checked = datetime.utcnow()
-                            status = "снова доступен" if is_available else "недоступен"
+                            site.last_checked = datetime.now(msk_tz)
+                            status = (
+                                "снова доступен"
+                                if is_available
+                                else f"недоступен ({reason})"
+                            )
 
                             # Check if user exists and chat is valid
                             try:
@@ -76,9 +87,11 @@ async def start_monitoring(bot, async_session):
                                 # Verify chat exists in Telegram
                                 await bot.get_chat(user.telegram_id)
                                 await bot.send_message(
-                                    user.telegram_id, f"Сайт {site.url} {status}"
+                                    user.telegram_id,
+                                    f"Сайт {site.url} {status} ({site.last_checked.strftime('%Y-%m-%d %H:%M:%S %Z')}).",
                                 )
-                                site.last_notified = datetime.utcnow()
+                                # site.last_notified = datetime.utcnow()
+                                site.last_notified = datetime.now(msk_tz)
                                 logger.info(
                                     f"Notification sent to user {user.telegram_id} for site {site.url}"
                                 )

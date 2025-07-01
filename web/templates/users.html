@@ -81,7 +81,7 @@
                                             {{ 'Доступен' if site.is_available else 'Недоступен' }}
                                         </span>
                                     </td>
-                                    <td>{{ site.last_checked or 'Никогда' }}</td>
+                                    <td>{{ site.last_checked.strftime('%Y-%m-%d %H:%M:%S MSK') if site.last_checked else 'Никогда' }}</td>
                                     <td>
                                         <form method="POST" action="/sites/{{ site.id }}/delete">
                                             <button type="submit" class="btn btn-sm btn-danger"><i class="fas fa-trash me-2"></i>Удалить</button>
