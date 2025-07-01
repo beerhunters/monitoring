@@ -2,13 +2,12 @@ import logging
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from models.models import Site, SystemSettings, User
+from models.models import Site, User, SystemSettings
 from config import Config
 from datetime import datetime
-from datetime import datetime, timedelta
-import asyncio
-from aiogram.exceptions import TelegramBadRequest
 from zoneinfo import ZoneInfo
+from aiogram import Bot
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -36,91 +35,73 @@ async def check_website(url: str) -> tuple[bool, str]:
             return False, str(e)
 
 
-async def start_monitoring(bot, async_session):
+async def start_monitoring(bot: Bot, async_session):
     logger.info("Starting monitoring loop")
     while True:
+        interval = Config.CHECK_INTERVAL  # Значение по умолчанию
         try:
             async with async_session() as session:
-                # Load check interval
-                logger.debug("Loading check interval from SystemSettings")
-                result = await session.execute(
-                    select(SystemSettings).filter_by(key="check_interval")
-                )
-                settings = result.scalar_one_or_none()
-                interval = int(settings.value) if settings else Config.CHECK_INTERVAL
-                logger.info(f"Using check interval: {interval} seconds")
+                logger.debug("Fetching check interval")
+                try:
+                    result = await session.execute(
+                        select(SystemSettings).filter_by(key="check_interval")
+                    )
+                    settings = result.scalar_one_or_none()
+                    interval = (
+                        int(settings.value) if settings else Config.CHECK_INTERVAL
+                    )
+                    logger.debug(f"Check interval: {interval} seconds")
+                except Exception as e:
+                    logger.error(
+                        f"Failed to fetch check interval: {str(e)}", exc_info=True
+                    )
+                    interval = Config.CHECK_INTERVAL  # Используем значение по умолчанию
 
-                # Load all sites
-                logger.debug("Fetching all sites from database")
+                logger.debug("Fetching sites")
                 result = await session.execute(select(Site))
                 sites = result.scalars().all()
-                msk_tz = ZoneInfo("Europe/Moscow")
                 logger.info(f"Found {len(sites)} sites to check")
 
+                if not sites:
+                    logger.warning("No sites found in the database")
+
+                msk_tz = ZoneInfo("Europe/Moscow")
                 for site in sites:
-                    logger.debug(
-                        f"Processing site ID {site.id}: {site.url} for user_id {site.user_id}"
-                    )
                     try:
+                        logger.info(f"Checking site {site.url}")
                         is_available, reason = await check_website(site.url)
+                        logger.info(
+                            f"Site {site.url} is available: {is_available}, reason: {reason}"
+                        )
                         if site.is_available != is_available:
                             site.is_available = is_available
                             site.last_checked = datetime.now(msk_tz)
-                            status = (
-                                "снова доступен"
-                                if is_available
-                                else f"недоступен ({reason})"
+                            result = await session.execute(
+                                select(User).filter_by(id=site.user_id)
                             )
-
-                            # Check if user exists and chat is valid
-                            try:
-                                result = await session.execute(
-                                    select(User).filter_by(id=site.user_id)
+                            user = result.scalar_one_or_none()
+                            if user:
+                                status = (
+                                    "снова доступен"
+                                    if is_available
+                                    else f"недоступен ({reason})"
                                 )
-                                user = result.scalar_one_or_none()
-                                if not user:
-                                    logger.warning(
-                                        f"No user found in database for user_id {site.user_id}"
-                                    )
-                                    continue
-
-                                # Verify chat exists in Telegram
-                                await bot.get_chat(user.telegram_id)
                                 await bot.send_message(
                                     user.telegram_id,
-                                    f"Сайт {site.url} {status} ({site.last_checked.strftime('%Y-%m-%d %H:%M:%S %Z')}).",
+                                    f"Сайт {site.url} {status} ({site.last_checked.strftime('%Y-%m-%d %H:%M:%S MSK')}).",
                                 )
-                                # site.last_notified = datetime.utcnow()
+                                logger.debug(
+                                    f"Notification sent to user {user.telegram_id}"
+                                )
                                 site.last_notified = datetime.now(msk_tz)
-                                logger.info(
-                                    f"Notification sent to user {user.telegram_id} for site {site.url}"
-                                )
-                            except TelegramBadRequest as e:
-                                if "chat not found" in str(e).lower():
-                                    logger.error(
-                                        f"Cannot send notification for site {site.url}: Chat not found for telegram_id {user.telegram_id}"
-                                    )
-                                else:
-                                    logger.error(
-                                        f"Telegram API error for site {site.url}: {str(e)}"
-                                    )
-                            except Exception as e:
-                                logger.error(
-                                    f"Failed to send notification for site {site.url}: {str(e)}"
-                                )
+                            await session.commit()
                         else:
-                            logger.debug(
-                                f"Site {site.url} status unchanged: {'available' if site.is_available else 'unavailable'}"
-                            )
-                        await session.commit()
+                            site.last_checked = datetime.now(msk_tz)
+                            await session.commit()
                     except Exception as e:
                         logger.error(f"Error processing site {site.url}: {str(e)}")
-                        await session.rollback()
-                logger.debug(f"Finished processing sites, committing session")
-                await session.commit()
-
-            logger.debug(f"Sleeping for {interval} seconds")
-            await asyncio.sleep(interval)
+                        continue
         except Exception as e:
-            logger.error(f"Monitoring loop error: {str(e)}")
-            await asyncio.sleep(10)  # Prevent tight loop on persistent errors
+            logger.error(f"Monitoring loop error: {str(e)}", exc_info=True)
+        logger.debug(f"Sleeping for {interval} seconds")
+        await asyncio.sleep(interval)

@@ -10,7 +10,8 @@ services:
      - db
    volumes:
      - .:/app
-   command: python -m bot.bot
+   command: >
+     sh -c "python -m init_db && python -m bot.bot"
 
  web:
    build: .
